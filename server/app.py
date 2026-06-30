@@ -96,6 +96,38 @@ def generate_command_from_ollama(user_text: str) -> str:
     return _ollama_generate(system_prompt(), build_user_prompt(user_text))
 
 
+import re as _re
+
+
+def _revert_hallucinated_placeholders(
+    adapted: str, template: str, user_text: str
+) -> str:
+    """If Qwen invented values for placeholders the user didn't specify,
+    put the original placeholders back."""
+    import re as _re
+
+    placeholders = _re.findall(r"\{(\w+)\}", template)
+    if not placeholders:
+        return adapted
+
+    user_words = set(user_text.lower().split())
+
+    for ph in placeholders:
+        for token in adapted.split():
+            clean = token.strip("\"';")
+            if not clean:
+                continue
+            # Path-like tokens not in the user's original request
+            # are almost certainly model hallucinations
+            if clean.startswith("/") and clean.lower() not in user_words:
+                if clean not in user_text and clean not in template:
+                    if not clean.startswith("/dev/"):
+                        adapted = adapted.replace(clean, "{" + ph + "}", 1)
+                        break
+
+    return adapted
+
+
 def generate_command_with_kb(
     user_text: str,
     kb: KnowledgeBase,
@@ -103,18 +135,26 @@ def generate_command_with_kb(
     """KB-first generation: search KB, adapt best match with Qwen.
 
     Falls back to direct generation when the KB returns no results.
+    If Qwen hallucinates placeholder values, those are reverted.
     """
     matches = kb.search(user_text, limit=3)
     if not matches:
         return generate_command_from_ollama(user_text)
 
     best = matches[0]
+    template = best["command"]
 
     # Adaptation mode — ask Qwen to fill in template placeholders
-    return _ollama_generate(
+    adapted = _ollama_generate(
         adaptation_system_prompt(),
-        build_adaptation_prompt(best["command"], user_text),
+        build_adaptation_prompt(template, user_text),
     )
+
+    # Safety net: if Qwen hallucinated values, revert to placeholders
+    if "{" not in adapted and "{" in template:
+        adapted = _revert_hallucinated_placeholders(adapted, template, user_text)
+
+    return adapted
 
 
 @app.get("/health", response_model=HealthResponse)
