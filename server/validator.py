@@ -8,7 +8,7 @@ from dataclasses import dataclass
 DANGEROUS_MARKER = "#DANGEROUS"
 UNKNOWN_MARKER = "#UNKNOWN"
 
-MULTI_COMMAND_TOKENS = ("&&", "||", ";", "\n", "\r")
+MULTI_LINE_TOKENS = ("\n", "\r")
 
 DANGEROUS_PATTERNS = [
     re.compile(r"\brm\s+-[^\n]*\brf\b[^\n]*(?:^|\s)/(?=\s|$)", re.IGNORECASE),
@@ -55,10 +55,10 @@ def looks_dangerous(command: str) -> bool:
     return any(pattern.search(normalized) for pattern in DANGEROUS_PATTERNS)
 
 
-def is_single_command(command: str) -> bool:
+def is_single_line(command: str) -> bool:
     if not command.strip():
         return False
-    return not any(token in command for token in MULTI_COMMAND_TOKENS)
+    return not any(token in command for token in MULTI_LINE_TOKENS)
 
 
 def dangerous_response(original_command: str) -> ValidationResult:
@@ -80,7 +80,7 @@ def validate_generated_command(raw_output: str) -> ValidationResult:
     if command.startswith("# UNKNOWN") or command.startswith(UNKNOWN_MARKER) or upper.startswith(UNKNOWN_MARKER):
         return unknown_response()
 
-    if not is_single_command(command):
+    if not is_single_line(command):
         return unknown_response()
 
     if looks_dangerous(command):

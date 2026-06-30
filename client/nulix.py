@@ -9,7 +9,7 @@ import requests
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Translate natural language into one Bash command.")
+    parser = argparse.ArgumentParser(description="Translate natural language into one Bash shell line.")
     parser.add_argument("text", nargs="+", help="Linux intent in natural language")
     return parser.parse_args()
 

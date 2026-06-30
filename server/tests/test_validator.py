@@ -13,6 +13,16 @@ class ValidatorTests(unittest.TestCase):
         self.assertEqual(result.command, "mkdir photos")
         self.assertFalse(result.dangerous)
 
+    def test_single_line_pipeline_is_allowed(self) -> None:
+        result = validate_generated_command("find . -type f | wc -l")
+        self.assertEqual(result.command, "find . -type f | wc -l")
+        self.assertFalse(result.dangerous)
+
+    def test_single_line_chaining_is_allowed(self) -> None:
+        result = validate_generated_command("mkdir photos && cd photos")
+        self.assertEqual(result.command, "mkdir photos && cd photos")
+        self.assertFalse(result.dangerous)
+
     def test_model_unknown_becomes_echo(self) -> None:
         result = validate_generated_command("# UNKNOWN")
         self.assertEqual(result.command, "echo '#UNKNOWN'")

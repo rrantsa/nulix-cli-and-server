@@ -2,7 +2,7 @@
 
 Nulix is a focused natural-language-to-Bash translator.
 
-It accepts a short Linux intent, sends it to a self-hosted API backed by Ollama, and returns exactly one shell command. The CLI never executes the command automatically, so the user stays in control.
+It accepts a short Linux intent, sends it to a self-hosted API backed by Ollama, and returns exactly one Bash shell line. The CLI never executes the result automatically, so the user stays in control.
 
 ```bash
 nulix "create a folder named photos"
@@ -16,7 +16,7 @@ nulix "create a folder named photos" | bash
 - FastAPI server protected by `X-API-Key`
 - Ollama integration using `qwen3:0.6b` by default
 - Second-pass validation for obviously dangerous commands
-- CLI client that prints only the returned command
+- CLI client that prints only the returned shell line
 - Ubuntu-oriented install scripts for the server and the client
 - Nginx reverse proxy and `systemd` service templates
 
@@ -141,8 +141,9 @@ export NULIX_API_KEY="client-raspberry-123"
 
 ## Security model
 
-- The model is instructed to output one Linux command and nothing else.
+- The model is instructed to output one Linux shell line and nothing else.
 - The API performs a second validation pass before replying.
+- Single-line pipelines or chaining are allowed when they are useful and not blocked by safety validation.
 - Dangerous outputs are converted to a harmless echo command such as:
 
 ```bash
