@@ -1,0 +1,5 @@
+# One API key per line.
+# Copy this file to /opt/nulix/api_keys.txt or point NULIX_API_KEYS_FILE to it.
+
+client-my-pc-api-key
+client-my-raspberry-pi-123-ultra-secret-long-key

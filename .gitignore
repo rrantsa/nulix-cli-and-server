@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.venv/
+.tmp_skill_extract/
+.env
+basic-memory/
+memory/
+docs/
