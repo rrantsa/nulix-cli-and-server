@@ -21,6 +21,7 @@ fi
 export NULIX_DOMAIN
 export NULIX_EMAIL
 export NULIX_INSTALL_DIR="${NULIX_INSTALL_DIR:-/opt/nulix}"
+export NULIX_MODEL_PROVIDER="${NULIX_MODEL_PROVIDER:-ollama}"
 
 bash "${ROOT_DIR}/server/install.sh"
 

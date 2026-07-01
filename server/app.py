@@ -9,6 +9,7 @@ from fastapi import FastAPI, Header, HTTPException, status
 from pydantic import BaseModel, Field
 
 from knowledge import KnowledgeBase, get_knowledge_base
+from model_provider import ModelProviderConfigError, generate_text_from_model
 from prompt import (
     adaptation_system_prompt,
     build_adaptation_prompt,
@@ -60,40 +61,9 @@ def ensure_api_key(api_key: str | None, keys: Iterable[str]) -> None:
         )
 
 
-def _ollama_generate(system: str, prompt: str) -> str:
-    """Call Ollama with the given system + user prompt and return the response text."""
-    ollama_url = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
-    ollama_model = os.getenv("OLLAMA_MODEL", "qwen3:0.6b")
-    timeout_seconds = float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "20"))
-
-    response = requests.post(
-        f"{ollama_url.rstrip('/')}/api/generate",
-        json={
-            "model": ollama_model,
-            "system": system,
-            "prompt": prompt,
-            "stream": False,
-            "options": {
-                "temperature": 0,
-            },
-        },
-        timeout=timeout_seconds,
-    )
-    response.raise_for_status()
-
-    payload = response.json()
-    generated = payload.get("response", "").strip()
-    if not generated:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Ollama returned an empty response",
-        )
-    return generated
-
-
-def generate_command_from_ollama(user_text: str) -> str:
+def generate_command_from_provider(user_text: str) -> str:
     """Direct generation — used as fallback when KB has no good match."""
-    return _ollama_generate(system_prompt(), build_user_prompt(user_text))
+    return generate_text_from_model(system_prompt(), build_user_prompt(user_text))
 
 
 import re as _re
@@ -139,13 +109,13 @@ def generate_command_with_kb(
     """
     matches = kb.search(user_text, limit=3)
     if not matches:
-        return generate_command_from_ollama(user_text)
+        return generate_command_from_provider(user_text)
 
     best = matches[0]
     template = best["command"]
 
     # Adaptation mode — ask Qwen to fill in template placeholders
-    adapted = _ollama_generate(
+    adapted = generate_text_from_model(
         adaptation_system_prompt(),
         build_adaptation_prompt(template, user_text),
     )
@@ -198,11 +168,16 @@ def generate(
         if kb is not None:
             raw_command = generate_command_with_kb(request.text, kb)
         else:
-            raw_command = generate_command_from_ollama(request.text)
+            raw_command = generate_command_from_provider(request.text)
     except requests.RequestException as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Ollama request failed: {exc}",
+            detail=f"Model provider request failed: {exc}",
+        ) from exc
+    except ModelProviderConfigError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
         ) from exc
 
     result: ValidationResult = validate_generated_command(raw_command)

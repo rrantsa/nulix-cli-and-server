@@ -2,7 +2,7 @@
 
 Nulix is a focused natural-language-to-Bash translator.
 
-It accepts a short Linux intent, sends it to a self-hosted API backed by Ollama, and returns exactly one Bash shell line. The CLI never executes the result automatically, so the user stays in control.
+It accepts a short Linux intent, sends it to a self-hosted API, and returns exactly one Bash shell line. The CLI never executes the result automatically, so the user stays in control.
 
 ```bash
 nulix "create a folder named photos"
@@ -14,7 +14,8 @@ nulix "create a folder named photos" | bash
 ## Features
 
 - FastAPI server protected by `X-API-Key`
-- Ollama integration using `qwen3:0.6b` by default
+- KB-first command generation with SQLite FTS intent search and template adaptation
+- Configurable server-side model providers: local Ollama or external OpenAI-compatible APIs
 - Second-pass validation for obviously dangerous commands
 - CLI client that prints only the returned shell line
 - Ubuntu-oriented install scripts for the server and the client
@@ -73,6 +74,11 @@ Response:
 
 ### Server
 
+The server can run in two modes:
+
+- KB-first mode: search the local knowledge base, pick a command template, then adapt placeholders through the configured model provider
+- Direct generation fallback: when KB is disabled or no rule matches, ask the configured model provider for one shell line directly
+
 ```bash
 python3 -m venv .venv
 . .venv/bin/activate
@@ -95,9 +101,15 @@ python3 client/nulix.py "list files sorted by size"
 ### Server
 
 - `NULIX_API_KEYS_FILE`
+- `NULIX_MODEL_PROVIDER`
+- `NULIX_MODEL_NAME`
+- `NULIX_MODEL_TIMEOUT_SECONDS`
+- `NULIX_KB_ENABLED`
+- `NULIX_KB_PATH`
 - `OLLAMA_URL`
-- `OLLAMA_MODEL`
-- `OLLAMA_TIMEOUT_SECONDS`
+- `NULIX_EXTERNAL_API_BASE_URL`
+- `NULIX_EXTERNAL_API_KEY`
+- `NULIX_EXTERNAL_API_PATH`
 - `NULIX_SERVER_HOST`
 - `NULIX_SERVER_PORT`
 
@@ -117,11 +129,25 @@ Run the root installer on Ubuntu with a public domain already pointing to the se
 sudo NULIX_DOMAIN=nulix.example.com NULIX_EMAIL=ops@example.com ./install.sh
 ```
 
-This script:
+That installs the KB-first server with local Ollama by default. You can also target an external OpenAI-compatible API:
 
-- installs Ollama and the `qwen3:0.6b` model
+```bash
+sudo \
+  NULIX_DOMAIN=nulix.example.com \
+  NULIX_EMAIL=ops@example.com \
+  NULIX_MODEL_PROVIDER=openai_compatible \
+  NULIX_MODEL_NAME=gpt-4.1-mini \
+  NULIX_EXTERNAL_API_BASE_URL=https://api.openai.com/v1 \
+  NULIX_EXTERNAL_API_KEY=your-secret-key \
+  ./install.sh
+```
+
+The installer:
+
+- installs Ollama and pulls the configured local model when `NULIX_MODEL_PROVIDER=ollama`
 - creates `/opt/nulix`
 - installs Python dependencies
+- installs the KB-first server modules and training script
 - installs the API `systemd` service
 - configures Nginx
 - requests a Let's Encrypt certificate
@@ -142,8 +168,10 @@ export NULIX_API_KEY="client-raspberry-123"
 ## Security model
 
 - The model is instructed to output one Linux shell line and nothing else.
+- The server prefers the local KB first, then falls back to direct model generation when needed.
 - The API performs a second validation pass before replying.
 - Single-line pipelines or chaining are allowed when they are useful and not blocked by safety validation.
+- The server can use either a local Ollama model or an external OpenAI-compatible API, depending on deployment configuration.
 - Dangerous outputs are converted to a harmless echo command such as:
 
 ```bash
@@ -157,6 +185,12 @@ echo '#UNKNOWN'
 ```
 
 This keeps `nulix "..." | bash` from executing blocked commands directly.
+
+## Knowledge Base
+
+- The local KB lives in SQLite and is accessed through [server/knowledge.py](server/knowledge.py).
+- The server seeds default rules automatically when the KB is empty.
+- [scripts/train_kb.py](scripts/train_kb.py) can be used to enrich the KB with additional curated intents.
 
 ## License
 
