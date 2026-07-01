@@ -77,6 +77,52 @@ class ModelProviderTests(unittest.TestCase):
         self.assertEqual(payload["system"], "system text")
         self.assertEqual(payload["prompt"], "prompt text")
 
+    @patch("model_provider.requests.post")
+    def test_anthropic_compatible_provider_uses_messages_api(self, mock_post: Mock) -> None:
+        os.environ["NULIX_MODEL_PROVIDER"] = "anthropic_compatible"
+        os.environ["NULIX_EXTERNAL_API_BASE_URL"] = "https://api.deepseek.com/anthropic"
+        os.environ["NULIX_EXTERNAL_API_KEY"] = "secret"
+        os.environ["NULIX_MODEL_NAME"] = "deepseek-v4-flash"
+        mock_response = Mock()
+        mock_response.json.return_value = {
+            "content": [
+                {"type": "thinking", "thinking": "We need ls -a"},
+                {"type": "text", "text": "ls -a"},
+            ]
+        }
+        mock_response.raise_for_status.return_value = None
+        mock_post.return_value = mock_response
+
+        command = generate_command_from_model("list all files including hidden")
+
+        self.assertEqual(command, "ls -a")
+        url = mock_post.call_args.kwargs["url"] if "url" in mock_post.call_args.kwargs else mock_post.call_args.args[0]
+        self.assertEqual(url, "https://api.deepseek.com/anthropic/v1/messages")
+        headers = mock_post.call_args.kwargs["headers"]
+        self.assertEqual(headers["x-api-key"], "secret")
+        self.assertEqual(headers["anthropic-version"], "2023-06-01")
+        json_body = mock_post.call_args.kwargs["json"]
+        self.assertEqual(json_body["system"], mock_post.call_args.kwargs["json"]["system"])
+        self.assertEqual(json_body["thinking"], {"type": "disabled"})
+
+    @patch("model_provider.requests.post")
+    def test_anthropic_compatible_skips_thinking_blocks(self, mock_post: Mock) -> None:
+        os.environ["NULIX_MODEL_PROVIDER"] = "anthropic_compatible"
+        os.environ["NULIX_EXTERNAL_API_BASE_URL"] = "https://api.deepseek.com/anthropic"
+        os.environ["NULIX_EXTERNAL_API_KEY"] = "secret"
+        mock_response = Mock()
+        # Response with only thinking, no text — should raise
+        mock_response.json.return_value = {
+            "content": [
+                {"type": "thinking", "thinking": "just thinking, no output"},
+            ]
+        }
+        mock_response.raise_for_status.return_value = None
+        mock_post.return_value = mock_response
+
+        with self.assertRaises(ModelProviderConfigError):
+            generate_command_from_model("anything")
+
     def test_unsupported_provider_raises(self) -> None:
         os.environ["NULIX_MODEL_PROVIDER"] = "unknown"
         with self.assertRaises(ModelProviderConfigError):

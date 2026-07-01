@@ -97,12 +97,66 @@ def request_openai_compatible(system: str, prompt: str) -> str:
     return generated
 
 
+def request_anthropic_compatible(system: str, prompt: str) -> str:
+    """Call an Anthropic-compatible Messages API (e.g. DeepSeek's /anthropic endpoint)."""
+    base_url = os.getenv("NULIX_EXTERNAL_API_BASE_URL", "").strip()
+    api_key = os.getenv("NULIX_EXTERNAL_API_KEY", "").strip()
+    api_path = os.getenv("NULIX_EXTERNAL_API_PATH", "/v1/messages").strip()
+    model_name = get_model_name("deepseek-v4-flash")
+    anthropic_version = os.getenv("NULIX_ANTHROPIC_VERSION", "2023-06-01").strip()
+
+    if not base_url:
+        raise ModelProviderConfigError("NULIX_EXTERNAL_API_BASE_URL is required for anthropic_compatible provider")
+    if not api_key:
+        raise ModelProviderConfigError("NULIX_EXTERNAL_API_KEY is required for anthropic_compatible provider")
+
+    path = api_path if api_path.startswith("/") else f"/{api_path}"
+    response = requests.post(
+        f"{base_url.rstrip('/')}{path}",
+        headers={
+            "x-api-key": api_key,
+            "anthropic-version": anthropic_version,
+            "Content-Type": "application/json",
+        },
+        json={
+            "model": model_name,
+            "system": system,
+            "messages": [
+                {"role": "user", "content": prompt},
+            ],
+            "max_tokens": 256,
+            "temperature": 0,
+            "thinking": {"type": "disabled"},
+        },
+        timeout=get_timeout_seconds(),
+    )
+    response.raise_for_status()
+
+    payload = response.json()
+    content_blocks = payload.get("content") or []
+    if not content_blocks:
+        raise ModelProviderConfigError("Anthropic-compatible API returned no content")
+
+    # Extract only text blocks (skip thinking/redacted blocks)
+    text_parts = [
+        block.get("text", "")
+        for block in content_blocks
+        if isinstance(block, dict) and block.get("type") == "text"
+    ]
+    generated = "".join(text_parts).strip()
+    if not generated:
+        raise ModelProviderConfigError("Anthropic-compatible API returned an empty response")
+    return generated
+
+
 def generate_text_from_model(system: str, prompt: str) -> str:
     provider = get_model_provider()
     if provider == "ollama":
         return request_ollama(system, prompt)
     if provider == "openai_compatible":
         return request_openai_compatible(system, prompt)
+    if provider == "anthropic_compatible":
+        return request_anthropic_compatible(system, prompt)
     raise ModelProviderConfigError(f"Unsupported NULIX_MODEL_PROVIDER: {provider}")
 
 
