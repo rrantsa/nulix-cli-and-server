@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 import re
+import threading
 from pathlib import Path
 from typing import Optional
 
@@ -359,34 +360,48 @@ SEED_RULES: list[tuple[str, str, str]] = [
 # ---------------------------------------------------------------------------
 
 class KnowledgeBase:
-    """SQLite + FTS5 knowledge base storing intent → command mappings."""
+    """SQLite + FTS5 knowledge base storing intent → command mappings.
+
+    Uses thread-local connections so that concurrent requests served by
+    different OS threads do not serialise on a single ``sqlite3.Connection``
+    object.  WAL-mode SQLite supports concurrent reads across connections;
+    sharing one connection would turn it into an accidental mutex.
+    """
 
     def __init__(self, db_path: str = "/opt/nulix/knowledge.db"):
         self.db_path = db_path
-        self._conn: sqlite3.Connection | None = None
+        self._local = threading.local()
 
     # ── connection management ──────────────────────────────────────
 
+    def _make_conn(self) -> sqlite3.Connection:
+        """Create and initialise a new SQLite connection."""
+        Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(
+            self.db_path,
+            check_same_thread=False,
+            timeout=10,  # seconds — fail fast instead of blocking indefinitely
+        )
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=5000")  # 5 s — tolerate brief WAL contention
+        conn.execute("PRAGMA foreign_keys=ON")
+        return conn
+
     @property
     def conn(self) -> sqlite3.Connection:
-        if self._conn is None:
-            Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
-            self._conn = sqlite3.connect(self.db_path)
-            self._conn.row_factory = sqlite3.Row
-            self._conn.execute("PRAGMA journal_mode=WAL")
-            self._conn.execute("PRAGMA foreign_keys=ON")
-            self._init_schema()
-        return self._conn
+        """Thread-local connection — each OS thread gets its own."""
+        conn = getattr(self._local, "conn", None)
+        if conn is None:
+            conn = self._make_conn()
+            self._local.conn = conn
+            # Seed schema on first connection (idempotent CREATE IF NOT EXISTS)
+            self._init_schema_on(conn)
+        return conn
 
-    def close(self) -> None:
-        if self._conn is not None:
-            self._conn.close()
-            self._conn = None
-
-    # ── schema ─────────────────────────────────────────────────────
-
-    def _init_schema(self) -> None:
-        self.conn.executescript(
+    def _init_schema_on(self, conn: sqlite3.Connection) -> None:
+        """Run schema DDL on *conn* so the caller doesn't need the shared conn."""
+        conn.executescript(
             """
             CREATE TABLE IF NOT EXISTS rules (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -423,7 +438,17 @@ class KnowledgeBase:
             END;
             """
         )
-        self.conn.commit()
+        conn.commit()
+
+    def close(self) -> None:
+        """Close all thread-local connections known to this process."""
+        # The thread that calls close() only closes its own connection.
+        conn = getattr(self._local, "conn", None)
+        if conn is not None:
+            conn.close()
+            self._local.conn = None
+
+    # ── schema (delegated to _init_schema_on) ──────────────────────
 
     # ── search ─────────────────────────────────────────────────────
 
