@@ -521,6 +521,32 @@ class KnowledgeBase:
         self.conn.commit()
         return cur.lastrowid
 
+    def add_rule_if_missing(
+        self,
+        intent: str,
+        command: str,
+        category: str | None = None,
+    ) -> tuple[int, bool]:
+        """Insert a rule unless the same ``(intent, command)`` already exists.
+
+        Returns ``(rule_id, created)`` where ``created`` is ``True`` only when
+        a new row was inserted. Category is intentionally not part of the
+        uniqueness check so idempotent writes stay stable across callers.
+        """
+        row = self.conn.execute(
+            "SELECT id FROM rules WHERE intent = ? AND command = ?",
+            (intent, command),
+        ).fetchone()
+        if row is not None:
+            return int(row["id"]), False
+
+        cur = self.conn.execute(
+            "INSERT INTO rules (intent, command, category) VALUES (?, ?, ?)",
+            (intent, command, category),
+        )
+        self.conn.commit()
+        return int(cur.lastrowid), True
+
     def delete_rule(self, rule_id: int) -> bool:
         """Delete a rule by id.  Returns True if a row was removed."""
         cur = self.conn.execute("DELETE FROM rules WHERE id = ?", (rule_id,))

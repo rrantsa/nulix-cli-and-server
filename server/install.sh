@@ -53,8 +53,15 @@ if [[ ! -f "${INSTALL_DIR}/api_keys.txt" ]]; then
     "${INSTALL_DIR}/api_keys.txt"
 fi
 
+if [[ ! -f "${INSTALL_DIR}/admin_api_keys.txt" ]]; then
+  install -m 0640 -o "${SERVICE_USER}" -g "${SERVICE_USER}" \
+    "${ROOT_DIR}/server/admin_api_keys.txt.example" \
+    "${INSTALL_DIR}/admin_api_keys.txt"
+fi
+
 cat > "${ENV_FILE}" <<EOF
 NULIX_API_KEYS_FILE=${INSTALL_DIR}/api_keys.txt
+NULIX_ADMIN_API_KEYS_FILE=${NULIX_ADMIN_API_KEYS_FILE:-${INSTALL_DIR}/admin_api_keys.txt}
 NULIX_MODEL_PROVIDER=${MODEL_PROVIDER}
 NULIX_MODEL_NAME=${MODEL_NAME}
 NULIX_MODEL_TIMEOUT_SECONDS=${NULIX_MODEL_TIMEOUT_SECONDS:-20}

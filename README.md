@@ -15,6 +15,7 @@ nulix "create a folder named photos" | bash
 
 - FastAPI server protected by `X-API-Key`
 - KB-first command generation with SQLite FTS intent search and template adaptation
+- Admin-only rule memorization with alias support for user-added commands
 - Configurable server-side model providers: local Ollama or external OpenAI-compatible APIs
 - Second-pass validation for obviously dangerous commands
 - CLI client that prints only the returned shell line
@@ -60,6 +61,37 @@ Response:
 }
 ```
 
+### `POST /rules`
+
+Headers:
+
+```text
+X-API-Key: your-admin-api-key
+```
+
+Body:
+
+```json
+{
+  "intent": "restart nginx",
+  "command": "systemctl restart nginx",
+  "aliases": [
+    "restart nginx service",
+    "nginx restart"
+  ]
+}
+```
+
+Response:
+
+```json
+{
+  "created": 3,
+  "duplicates": 0,
+  "category": "user-added"
+}
+```
+
 ### `GET /health`
 
 Response:
@@ -84,7 +116,9 @@ python3 -m venv .venv
 . .venv/bin/activate
 pip install -r server/requirements.txt
 cp server/api_keys.txt.example server/api_keys.txt
+cp server/admin_api_keys.txt.example server/admin_api_keys.txt
 export NULIX_API_KEYS_FILE="$PWD/server/api_keys.txt"
+export NULIX_ADMIN_API_KEYS_FILE="$PWD/server/admin_api_keys.txt"
 uvicorn app:app --app-dir server --reload
 ```
 
@@ -93,7 +127,9 @@ uvicorn app:app --app-dir server --reload
 ```bash
 export NULIX_API_URL="http://127.0.0.1:8000"
 export NULIX_API_KEY="client-local-dev"
+export NULIX_ADMIN_API_KEY="admin-local-dev"
 python3 client/nulix.py "list files sorted by size"
+python3 client/nulix.py memorize "restart nginx" "systemctl restart nginx" --alias "nginx restart"
 ```
 
 ## Environment
@@ -101,6 +137,7 @@ python3 client/nulix.py "list files sorted by size"
 ### Server
 
 - `NULIX_API_KEYS_FILE`
+- `NULIX_ADMIN_API_KEYS_FILE`
 - `NULIX_MODEL_PROVIDER`
 - `NULIX_MODEL_NAME`
 - `NULIX_MODEL_TIMEOUT_SECONDS`
@@ -117,6 +154,7 @@ python3 client/nulix.py "list files sorted by size"
 
 - `NULIX_API_URL`
 - `NULIX_API_KEY`
+- `NULIX_ADMIN_API_KEY`
 - `NULIX_CLIENT_TIMEOUT_SECONDS`
 
 ## Installation
@@ -163,6 +201,7 @@ Then configure:
 ```bash
 export NULIX_API_URL="https://nulix.example.com"
 export NULIX_API_KEY="client-raspberry-123"
+export NULIX_ADMIN_API_KEY="admin-laptop-key"
 ```
 
 ## Security model
@@ -170,6 +209,7 @@ export NULIX_API_KEY="client-raspberry-123"
 - The model is instructed to output one Linux shell line and nothing else.
 - The server prefers the local KB first, then falls back to direct model generation when needed.
 - The API performs a second validation pass before replying.
+- Admin writes use the same `X-API-Key` header but check a separate admin key file.
 - Single-line pipelines or chaining are allowed when they are useful and not blocked by safety validation.
 - The server can use either a local Ollama model or an external OpenAI-compatible API, depending on deployment configuration.
 - Dangerous outputs are converted to a harmless echo command such as:
@@ -190,6 +230,8 @@ This keeps `nulix "..." | bash` from executing blocked commands directly.
 
 - The local KB lives in SQLite and is accessed through [server/knowledge.py](server/knowledge.py).
 - The server seeds default rules automatically when the KB is empty.
+- `POST /rules` stores user-added commands in `rules` only, while SQLite triggers keep `rules_fts` in sync.
+- User-added commands can include alias intents so the same command is easier to find through multiple phrasings.
 - [scripts/train_kb.py](scripts/train_kb.py) can be used to enrich the KB with additional curated intents.
 
 ## License

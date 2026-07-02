@@ -28,6 +28,21 @@ class GenerateResponse(BaseModel):
     dangerous: bool
 
 
+class RuleCreateRequest(BaseModel):
+    intent: str = Field(..., min_length=1, description="Primary natural-language intent to memorize")
+    command: str = Field(..., min_length=1, description="Shell command template to store")
+    aliases: list[str] = Field(
+        default_factory=list,
+        description="Optional alternative phrasings stored as additional intents",
+    )
+
+
+class RuleCreateResponse(BaseModel):
+    created: int
+    duplicates: int
+    category: str
+
+
 class HealthResponse(BaseModel):
     status: str
 
@@ -35,8 +50,10 @@ class HealthResponse(BaseModel):
 app = FastAPI(title="Nulix API", version="0.1.0")
 
 
-def load_api_keys(path: Path) -> set[str]:
+def load_api_keys(path: Path, *, required: bool = True) -> set[str]:
     if not path.exists():
+        if not required:
+            return set()
         raise FileNotFoundError(f"API key file not found: {path}")
 
     keys = {
@@ -59,6 +76,24 @@ def ensure_api_key(api_key: str | None, keys: Iterable[str]) -> None:
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Invalid API key",
         )
+
+
+def _normal_api_keys_path() -> Path:
+    return Path(os.getenv("NULIX_API_KEYS_FILE", "/opt/nulix/api_keys.txt"))
+
+
+def _admin_api_keys_path() -> Path:
+    return Path(os.getenv("NULIX_ADMIN_API_KEYS_FILE", "/opt/nulix/admin_api_keys.txt"))
+
+
+def _load_generate_keys() -> set[str]:
+    user_keys = load_api_keys(_normal_api_keys_path())
+    admin_keys = load_api_keys(_admin_api_keys_path(), required=False)
+    return user_keys | admin_keys
+
+
+def _load_admin_keys() -> set[str]:
+    return load_api_keys(_admin_api_keys_path())
 
 
 def generate_command_from_provider(user_text: str) -> str:
@@ -147,14 +182,45 @@ def _get_kb() -> KnowledgeBase | None:
     return _kb
 
 
+def _clean_intent_text(text: str) -> str:
+    return " ".join(text.split())
+
+
+def _prepare_intents(primary_intent: str, aliases: list[str]) -> list[str]:
+    intents: list[str] = []
+    seen: set[str] = set()
+    for candidate in [primary_intent, *aliases]:
+        cleaned = _clean_intent_text(candidate)
+        if not cleaned or cleaned in seen:
+            continue
+        intents.append(cleaned)
+        seen.add(cleaned)
+    return intents
+
+
+def _validated_memorizable_command(command: str) -> str:
+    cleaned = command.strip()
+    result = validate_generated_command(cleaned)
+    if result.dangerous:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Refusing to memorize a dangerous command",
+        )
+    if result.command != cleaned:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Refusing to memorize a command that fails validation",
+        )
+    return cleaned
+
+
 @app.post("/generate", response_model=GenerateResponse)
 def generate(
     request: GenerateRequest,
     x_api_key: str | None = Header(default=None, alias="X-API-Key"),
 ) -> GenerateResponse:
-    keys_file = Path(os.getenv("NULIX_API_KEYS_FILE", "/opt/nulix/api_keys.txt"))
     try:
-        keys = load_api_keys(keys_file)
+        keys = _load_generate_keys()
     except FileNotFoundError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -182,6 +248,48 @@ def generate(
 
     result: ValidationResult = validate_generated_command(raw_command)
     return GenerateResponse(command=result.command, dangerous=result.dangerous)
+
+
+@app.post("/rules", response_model=RuleCreateResponse)
+def create_rule(
+    request: RuleCreateRequest,
+    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+) -> RuleCreateResponse:
+    try:
+        admin_keys = _load_admin_keys()
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+
+    ensure_api_key(x_api_key, admin_keys)
+
+    kb = _get_kb()
+    if kb is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Knowledge base is disabled",
+        )
+
+    command = _validated_memorizable_command(request.command)
+    intents = _prepare_intents(request.intent, request.aliases)
+
+    created = 0
+    duplicates = 0
+    category = "user-added"
+    for intent in intents:
+        _, was_created = kb.add_rule_if_missing(intent, command, category)
+        if was_created:
+            created += 1
+        else:
+            duplicates += 1
+
+    return RuleCreateResponse(
+        created=created,
+        duplicates=duplicates,
+        category=category,
+    )
 
 
 if __name__ == "__main__":

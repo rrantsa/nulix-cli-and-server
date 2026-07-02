@@ -47,3 +47,4 @@ systemctl restart nulix-api
 
 echo "Nulix server installed successfully."
 echo "Add API keys to ${NULIX_INSTALL_DIR}/api_keys.txt before using the service."
+echo "Add admin API keys to ${NULIX_INSTALL_DIR}/admin_api_keys.txt to enable memorize operations."

@@ -1,0 +1,6 @@
+# One admin API key per line.
+# Copy this file to /opt/nulix/admin_api_keys.txt or point NULIX_ADMIN_API_KEYS_FILE to it.
+# Admin keys can call both /generate and admin-only endpoints such as /rules.
+
+admin-laptop-key
+admin-console-key-rotate-me
