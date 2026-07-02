@@ -10,23 +10,34 @@ import requests
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     argv = list(sys.argv[1:] if argv is None else argv)
-    if argv and argv[0] == "memorize":
-        parser = argparse.ArgumentParser(description="Store an admin-approved intent to command mapping.")
-        parser.add_argument("mode", choices=["memorize"])
-        parser.add_argument("intent", help="Primary natural-language intent to memorize")
-        parser.add_argument("command", help="Shell command template to store")
-        parser.add_argument(
-            "--alias",
-            action="append",
-            default=[],
-            help="Additional intent phrasing to store for the same command",
-        )
-        return parser.parse_args(argv)
 
-    parser = argparse.ArgumentParser(description="Translate natural language into one Bash shell line.")
-    parser.add_argument("text", nargs="+", help="Linux intent in natural language")
+    parser = argparse.ArgumentParser(
+        description="Translate natural language into one Bash shell line.",
+    )
+    sub = parser.add_subparsers(dest="mode")
+
+    # --- generate (default) ---
+    gen = sub.add_parser("generate", help="Translate NL intent to a Bash command")
+    gen.add_argument("text", nargs="+", help="Linux intent in natural language")
+
+    # --- memorize ---
+    mem = sub.add_parser("memorize", help="Store an admin-approved intent to command mapping")
+    mem.add_argument("intent", help="Primary natural-language intent to memorize")
+    mem.add_argument("command", help="Shell command template to store")
+    mem.add_argument(
+        "--alias",
+        action="append",
+        default=[],
+        help="Additional intent phrasing to store for the same command",
+    )
+
+    # Allow bare text as shorthand for generate (no subcommand name)
+    if argv and argv[0] not in ("generate", "memorize", "-h", "--help"):
+        argv = ["generate"] + argv
+
     args = parser.parse_args(argv)
-    args.mode = "generate"
+    if args.mode is None:
+        args.mode = "generate"
     return args
 
 
