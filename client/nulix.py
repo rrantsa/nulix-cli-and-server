@@ -37,6 +37,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
     args = parser.parse_args(argv)
     if args.mode is None:
+        # No subcommand given and no bare text — show help
+        if not argv:
+            parser.print_help()
+            parser.exit(0)
         args.mode = "generate"
     return args
 
@@ -145,6 +149,10 @@ def main() -> int:
     if not api_url:
         print("NULIX_API_URL is not set.", file=sys.stderr)
         return 1
+
+    if args.mode is None:
+        parse_args(["--help"])
+        return 0
 
     if args.mode == "memorize":
         admin_api_key = os.getenv("NULIX_ADMIN_API_KEY")
